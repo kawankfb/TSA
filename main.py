@@ -1,20 +1,18 @@
 import re
 import nltk
 import pandas as pd
-import string
+import numpy as np
 from nltk.corpus import stopwords
 from gensim.parsing.preprocessing import remove_stopwords
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, TfidfTransformer
+from sklearn.feature_extraction.text import CountVectorizer
 import sklearn.metrics as metrics
 import imblearn
 from nltk.stem import WordNetLemmatizer
-import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_validate
+from sklearn.model_selection import cross_val_score
 
 def txt_to_csv(file_input,output):
 
@@ -34,17 +32,13 @@ def txt_to_csv(file_input,output):
             continue
         id = item[0]
         sentiment = item[1]
-        text = ""
-        for i in range(2,len(item)):
-            if len(item[i]) > 2:
-                text = text+item[i]
+        text = item[2]
         text = str.lower(text)
         text = re.sub(r'http\S+', '', text)
         text = remove_stopwords(text, stopwords=all_stopwords)
         text = re.sub(r'[^a-zA-Z\s]', '', text)
         word_list = nltk.word_tokenize(text)
         text = ' '.join([lemmatizer.lemmatize(w) for w in word_list])
-        # text = text.translate(str.maketrans('', '', string.punctuation)).translate(str.maketrans('', '', string.digits))
         if text.endswith('\n'):
             text = text.strip('\n')
         if text != "":
@@ -53,63 +47,49 @@ def txt_to_csv(file_input,output):
     f.close()
 
 
-# txt_to_csv("twitter-2016train-A.txt", "./train.csv")
-#txt_to_csv("SemEval2017-task4-dev.subtask-A.english.INPUT.txt", "./train.csv")
-#txt_to_csv("SemEval2017-task4-test.subtask-A.english.txt", "./test.csv")
+if False:
+    txt_to_csv("SemEval2017-task4-dev.subtask-A.english.INPUT.txt", "./train.csv")
+
 tweets_train = pd.read_csv("train.csv", header=None)
-tweets_test = pd.read_csv("test.csv", header=None)
 
-# rus = imblearn.under_sampling.RandomUnderSampler(sampling_strategy='majority')
+X, y = tweets_train.iloc[:, [-1]].values.flatten(), tweets_train.iloc[:, [-2]].values.flatten()
 
-rus = imblearn.over_sampling.RandomOverSampler()
-
-# tweets_train, y_resampled = rus.fit_resample(X=tweets_train,y=tweets_train.iloc[:, [-2]])
-
-X, y= tweets_train.iloc[:, [-1]].values.flatten(), tweets_train.iloc[:, [-2]].values.flatten()
-
-# X_train, y_train = tweets_test.iloc[:, [-1]].values.flatten(), tweets_test.iloc[:, [-2]].values.flatten()
-# X_test, y_test = tweets_test.iloc[:, [-1]].values.flatten(), tweets_test.iloc[:, [-2]].values.flatten()
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
-plt.rcParams.update({'figure.figsize':(7,5), 'figure.dpi':100})
-plt.hist(y_train)
-plt.gca().set(title='Frequency Histogram', ylabel='Frequency')
-plt.show()
-
-plt.hist(y_test)
-plt.gca().set(title='Frequency Histogram', ylabel='Frequency')
-plt.show()
-
-cnt = CountVectorizer(analyzer="word")
 
 pipeline = Pipeline([
-   ('vectorizer',cnt),
-   ('model',MultinomialNB())
+   ('vectorizer', CountVectorizer(analyzer="word",max_features=10000)),
+   ('model', MultinomialNB())
 ])
+
+scores = cross_val_score(pipeline, X, y, cv=7)
+print("Accuracy is :%0.3f \n with a standard deviation of : %0.3f" % (scores.mean(), scores.std()))
+print()
+scores = cross_val_score(pipeline, X, y, cv=7, scoring='f1_macro')
+print("F1-Score Average is :%0.3f \n with a standard deviation of %0.3f" % (scores.mean(), scores.std()))
+print()
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33,random_state=42)
+
+ros = imblearn.over_sampling.RandomOverSampler()
+
+X_train=pd.DataFrame(np.stack((X_train, y_train), axis=1),columns=['text','label'])
+y_train= X_train.iloc[:, [1]]
+tweets_train, tweets_label = ros.fit_resample(X=X_train,y=y_train )
+X_train = tweets_train.iloc[:, [0]].values.flatten()
+y_train= tweets_train.iloc[:, [1]].values.flatten()
 
 pipeline.fit(X_train, y_train)
 
 y_pred = pipeline.predict(X_test)
-scores=cross_validate(pipeline,X,y,scoring='accuracy')
-print(scores)
-nb_acc=metrics.accuracy_score(y_test,y_pred)
-print("Accuracy Using Nominal Naiive Bayes : "+str(nb_acc))
 
-nb_acc=metrics.f1_score(y_test,y_pred,average=None)
-print("F1 Using Nominal Naiive Bayes : "+str(nb_acc))
 
-#
-# text_clf = Pipeline([
-#     ('vectorizer', CountVectorizer()),
-#     ('tfidf', TfidfTransformer()),
-#     ('clf', RandomForestClassifier()),
-# ])
-# text_clf.fit(X_train, X_label)
-# y_pred = text_clf.predict(y_train)
-# nb_acc=metrics.accuracy_score(y_test,y_pred)
-# print("Accuracy Using GBC : "+str(nb_acc))
-#
-# nb_acc=metrics.f1_score(y_test,y_pred,average=None)
-# print("F1 Using GBC: "+str(nb_acc))
-#
+nb_acc=metrics.accuracy_score(y_test, y_pred)
+print("Accuracy After Random Oversampling : "+str(nb_acc))
+print()
+
+nb_f1=metrics.f1_score(y_test,y_pred,average='macro')
+print("Average F1-Score After Random Oversampling : "+str(nb_f1))
+print()
+
+nb_f1=metrics.f1_score(y_test,y_pred,average=None)
+print("F1-Score of each class After Random Oversampling : "+str(nb_f1))
